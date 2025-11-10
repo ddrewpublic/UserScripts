@@ -1,6 +1,6 @@
 ## Userscripts for Tampermonkey
 
-QOL scripts to make some sites more tolerable.
+Browser scripts to make some sites more tolerable and add a bit of QOL.
 
 1. ChatGPT Bottom Area Resizer
    - add a handle to the ChatGPT input box, so that it can be moved around the screen.<br><br>
