@@ -1,40 +1,57 @@
 // ==UserScript==
-// @name         Redlib - Hide Suspected Advertising Posts
+// @name         Redlib - Advertising Post Filter
 // @namespace    https://github.com/ddrewprivate/UserScripts
-// @version      0.01
-// @description  Hide r/all posts with no subreddit, zero comments and no meaningful score.
+// @version      0.03
+// @description  Filter suspected advertising posts via the Tampermonkey menu.
 // @match        https://redlib.catsarch.com/r/all*
 // @run-at       document-idle
-// @grant        none
+// @noframes
+// @grant        GM_registerMenuCommand
+// @grant        GM_unregisterMenuCommand
+// @grant        GM_getValue
+// @grant        GM_setValue
 // ==/UserScript==
 
 (function () {
     'use strict';
 
-    // ---------- CONFIG: EDIT THIS ----------
-    const CONFIG = {
-        debug: false, // Log hidden posts and any processing errors to the console.
-    };
-    // -------- END CONFIG: EDIT ABOVE --------
-
-    // Keep the userscript confined to r/all, including sort and query variants.
+    // Restrict execution to r/all and its sorting variants.
     if (!/^\/r\/all(?:\/|$)/.test(window.location.pathname)) {
         return;
     }
 
+    // Persistent filtering preference.
+    const STORAGE_KEY = 'redlib-ad-filter-mode';
+
+    // Available modes, presented in the Tampermonkey extension menu.
+    const MODES = {
+        hide: 'Hide adverts',
+        only: 'Show only adverts',
+        all: 'Show all posts',
+    };
+
+    // Restore the saved preference; hide adverts by default.
+    let currentMode = GM_getValue(STORAGE_KEY, 'hide');
+
+    if (!Object.hasOwn(MODES, currentMode)) {
+        currentMode = 'hide';
+    }
+
+    // Track registered commands so their labels can be refreshed.
+    let menuCommandIds = [];
+
     /**
-     * Return the score text without the nested "Upvotes" label.
-     * Redlib renders the score itself as a direct text node.
+     * Extract the post score without the nested "Upvotes" label.
      *
-     * @param {Element|null} scoreElement - The post's score element.
-     * @returns {string} Displayed numeric score or placeholder.
+     * @param {Element|null} element - Post score element.
+     * @returns {string} Displayed score or placeholder.
      */
-    function getScoreText(scoreElement) {
-        if (!scoreElement) {
+    function getScoreText(element) {
+        if (!element) {
             return '';
         }
 
-        return Array.from(scoreElement.childNodes)
+        return Array.from(element.childNodes)
             .filter((node) => node.nodeType === Node.TEXT_NODE)
             .map((node) => node.textContent)
             .join('')
@@ -42,28 +59,37 @@
     }
 
     /**
-     * Identify posts matching all three suspected-ad characteristics.
-     * Missing subreddit or comment elements are not treated as matches.
+     * Identify suspected adverts using three conditions:
      *
-     * @param {Element} post - A Redlib feed post element.
-     * @returns {boolean} Whether the post should be hidden.
+     * 1. Subreddit is exactly "r/".
+     * 2. Comment count is zero.
+     * 3. Score is missing, zero, or a placeholder.
+     *
+     * @param {Element} post - Redlib post element.
+     * @returns {boolean} Whether all conditions match.
      */
     function isSuspectedAd(post) {
-        const subredditElement = post.querySelector('.post_header .post_subreddit');
-        const commentsElement = post.querySelector('.post_footer .post_comments');
+        const subreddit = post.querySelector(
+            '.post_header .post_subreddit'
+        );
+
+        const comments = post.querySelector(
+            '.post_footer .post_comments'
+        );
+
         const scoreElement = post.querySelector('.post_score');
 
-        if (!subredditElement || !commentsElement) {
+        // Missing essential metadata is not enough to classify an advert.
+        if (!subreddit || !comments) {
             return false;
         }
 
-        // Condition 1: No subreddit name (exactly "r/").
-        const blankSubreddit = subredditElement.textContent.trim() === 'r/';
+        const blankSubreddit = subreddit.textContent.trim() === 'r/';
 
-        // Condition 2: Exactly zero comments.
-        const zeroComments = /^0\s+comments?$/i.test(commentsElement.textContent.trim());
+        const zeroComments = /^0\s+comments?$/i.test(
+            comments.textContent.trim()
+        );
 
-        // Condition 3: No displayed score, zero, or Redlib's hidden-score bullet.
         const score = getScoreText(scoreElement);
         const noScore = /^(?:0|[•—–-]|n\/a)?$/i.test(score);
 
@@ -71,50 +97,128 @@
     }
 
     /**
-     * Remove suspected advertising posts and their preceding separators.
+     * Filter posts according to the currently selected mode.
      *
-     * @returns {number} Number of posts removed by this pass.
+     * Posts are hidden rather than deleted so changing modes
+     * can restore them without reloading the page.
      */
     function filterPosts() {
-        let removed = 0;
-
         for (const post of document.querySelectorAll('#posts > .post')) {
             try {
-                if (!isSuspectedAd(post)) {
-                    continue;
-                }
+                const suspectedAd = isSuspectedAd(post);
 
-                if (CONFIG.debug) {
-                    console.info('[Redlib Ad Filter] Hiding post:', post.id, post);
-                }
+                // Decide which posts should be hidden.
+                const shouldHide =
+                    (currentMode === 'hide' && suspectedAd) ||
+                    (currentMode === 'only' && !suspectedAd);
 
-                // Each Redlib feed post is preceded by its own <hr class="sep">.
+                // Apply or remove the filtering class.
+                post.classList.toggle(
+                    'redlib-ad-filter-hidden',
+                    shouldHide
+                );
+
+                // Each post has a preceding horizontal separator.
                 const separator = post.previousElementSibling;
+
                 if (separator?.matches('hr.sep')) {
-                    separator.remove();
+                    separator.classList.toggle(
+                        'redlib-ad-filter-hidden',
+                        shouldHide
+                    );
                 }
 
-                post.remove();
-                removed += 1;
             } catch (error) {
-                // One malformed post must not prevent processing the rest.
-                console.error('[Redlib Ad Filter] Could not process post:', error);
+                console.error(
+                    '[Redlib Ad Filter] Error processing post:',
+                    error
+                );
             }
         }
-
-        if (CONFIG.debug && removed > 0) {
-            console.info(`[Redlib Ad Filter] Removed ${removed} suspected ad(s).`);
-        }
-
-        return removed;
     }
 
-    // Filter the initial feed and any posts subsequently inserted into it.
+    /**
+     * Change the filtering mode, persist it and update the page.
+     *
+     * @param {string} mode - One of: hide, only, all.
+     */
+    function setMode(mode) {
+        if (!Object.hasOwn(MODES, mode)) {
+            console.error('[Redlib Ad Filter] Invalid mode:', mode);
+            return;
+        }
+
+        currentMode = mode;
+
+        // Store the preference in Tampermonkey's own storage.
+        GM_setValue(STORAGE_KEY, currentMode);
+
+        // Apply the new mode immediately.
+        filterPosts();
+
+        // Update the checkmark in the Tampermonkey menu.
+        registerMenuCommands();
+    }
+
+    /**
+     * Register the three filtering commands in Tampermonkey.
+     *
+     * The active command receives a checkmark.
+     * Existing commands are unregistered before refreshing.
+     */
+    function registerMenuCommands() {
+        // Remove previous commands to avoid duplicates.
+        for (const commandId of menuCommandIds) {
+            GM_unregisterMenuCommand(commandId);
+        }
+
+        menuCommandIds = [];
+
+        // Register one menu command per filtering mode.
+        for (const [mode, label] of Object.entries(MODES)) {
+            const selected = mode === currentMode;
+            const menuLabel = `${selected ? '✓ ' : '    '}${label}`;
+
+            const commandId = GM_registerMenuCommand(
+                menuLabel,
+                () => setMode(mode),
+                { autoClose: true }
+            );
+
+            menuCommandIds.push(commandId);
+        }
+    }
+
+    /**
+     * Install CSS used to hide filtered posts and their separators.
+     */
+    function installStyles() {
+        const style = document.createElement('style');
+
+        style.textContent = `
+            .redlib-ad-filter-hidden {
+                display: none !important;
+            }
+        `;
+
+        document.head.appendChild(style);
+    }
+
+    // Initialise the filtering system.
+    installStyles();
+    registerMenuCommands();
     filterPosts();
 
+    // Process additional posts if the feed is updated dynamically.
     const postsContainer = document.querySelector('#posts');
+
     if (postsContainer) {
-        const observer = new MutationObserver(() => filterPosts());
-        observer.observe(postsContainer, { childList: true });
+        const observer = new MutationObserver(() => {
+            filterPosts();
+        });
+
+        observer.observe(postsContainer, {
+            childList: true,
+        });
     }
 })();
