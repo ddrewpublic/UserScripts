@@ -1,12 +1,10 @@
 // ==UserScript==
 // @name         ChatGPT Stream Capture
 // @namespace    https://github.com/ddrewpublic/UserScripts
-// @version      1.5.0
-// @description  Capture every visible stream change and export timestamped plain text
+// @version      1.5.1
+// @description  Record timestamped full stream snapshots and export cleaned plain text
 // @match        https://chatgpt.com/*
 // @run-at       document-idle
-// @updateURL    https://raw.githubusercontent.com/ddrewpublic/UserScripts/main/ChatGPT_Stream_Capture-1.1.user.js
-// @downloadURL  https://raw.githubusercontent.com/ddrewpublic/UserScripts/main/ChatGPT_Stream_Capture-1.1.user.js
 // @grant        GM_registerMenuCommand
 // @grant        GM_unregisterMenuCommand
 // ==/UserScript==
@@ -156,80 +154,72 @@
     });
   }
 
-  /** Find the shared prefix, even when streamed content is rewritten. */
-  function commonPrefixLength(a, b) {
-    let i = 0;
-    const length = Math.min(a.length, b.length);
-    while (i < length && a[i] === b[i]) i += 1;
-    return i;
-  }
-
   /**
-   * Convert the full snapshot history to a timestamped change log.
-   * Prompts appear once; assistant entries contain only newly observed text.
-   * The original full snapshots remain intact for reliable collection.
+   * Build a readable log from the ORIGINAL full-page snapshots.
+   *
+   * Do not compute deltas. An assistant message at each timestamp contains
+   * everything visible in that message at that moment, including the text
+   * that appeared in earlier beats. This intentionally produces a large log.
+   *
+   * User prompts appear only once per conversation turn. Navigation and
+   * interface text are removed by cleanText() / splitTurns() at export time.
    */
   function buildEvents() {
     const events = [];
-    const lastTurnText = new Map();
+    const previousTurnText = new Map();
     const promptsSeen = new Set();
 
-    // Decide the mode across ALL snapshots, not from a single early state.
-    const hasRoleMarkers = snapshots.some(s => splitTurns(s.text).length > 0);
-    let previousFallback = '';
+    // Decide fallback mode using the entire history, not the first snapshot.
+    const hasRoleMarkers = snapshots.some(snapshot =>
+      splitTurns(snapshot.text).length > 0
+    );
+    let previousPageText = '';
 
     for (const snapshot of snapshots) {
       if (!hasRoleMarkers) {
-        // Preserve evidence of streaming even if ChatGPT changes its labels.
+        // If ChatGPT changes role labels, keep a full page-text snapshot
+        // rather than silently dropping the stream or exporting just deltas.
         let text = cleanText(snapshot.text);
         if (text.startsWith(CONFIG.fallbackNavigationPrefix)) {
           text = text.slice(CONFIG.fallbackNavigationPrefix.length).trimStart();
         }
-        if (text === previousFallback) continue;
-        const prefix = commonPrefixLength(previousFallback, text);
-        const addition = text.slice(prefix);
-        if (addition) events.push({ time: snapshot.time, role: 'page', text: addition });
-        previousFallback = text;
+        if (text && text !== previousPageText) {
+          events.push({ time: snapshot.time, role: 'page', text });
+        }
+        previousPageText = text;
         continue;
       }
 
       const turns = splitTurns(snapshot.text);
-      for (let i = 0; i < turns.length; i += 1) {
-        const turn = turns[i];
+      for (let index = 0; index < turns.length; index += 1) {
+        const turn = turns[index];
         if (!turn.text.trim()) continue;
 
-        // Turn order is stable across successive full-page snapshots.
-        const key = `${i}:${turn.role}`;
-        const prior = lastTurnText.get(key) || '';
+        // Keep independent histories for each conversation turn.
+        const key = `${index}:${turn.role}`;
+        const previousText = previousTurnText.get(key);
 
         if (turn.role === 'user') {
-          // Only one record for each prompt, regardless of future snapshots.
+          // Prompts do not need to be repeated with each assistant beat.
           if (!promptsSeen.has(key)) {
             events.push({ time: snapshot.time, role: 'user', text: turn.text });
             promptsSeen.add(key);
           }
-          lastTurnText.set(key, turn.text);
-          continue;
+        } else if (turn.text !== previousText) {
+          // IMPORTANT: save the complete assistant text, NOT an added suffix.
+          // A shrink/re-render is also recorded, just like the original
+          // full-page snapshots, instead of trying to reconstruct the stream.
+          events.push({ time: snapshot.time, role: 'assistant', text: turn.text });
         }
 
-        if (turn.text === prior) continue;
-
-        // A temporary shrink (e.g. a hidden streaming node) is not new text.
-        if (prior.startsWith(turn.text)) continue;
-
-        const prefix = commonPrefixLength(prior, turn.text);
-        const addition = turn.text.slice(prefix);
-        if (addition) {
-          events.push({ time: snapshot.time, role: 'assistant', text: addition });
-        }
-        lastTurnText.set(key, turn.text);
+        previousTurnText.set(key, turn.text);
       }
     }
 
     return events;
   }
 
-  /** Produce flat text with one timestamp for every retained change. */
+  /** Export complete assistant content at each timestamp, not fragments. */
   function buildExport() {
     const lines = [
       `Start time: ${startedAt}`,
@@ -245,7 +235,8 @@
         lines.push(event.role === 'user' ? 'You said:' :
           event.role === 'assistant' ? 'ChatGPT said:' : 'Page text:');
       }
-      lines.push(`[${event.time}]`, event.text, '');
+      // Explicit separator makes full, repeated snapshots easier to scan.
+      lines.push(`--- ${event.time} ---`, event.text, '');
       previousRole = event.role;
     }
 
