@@ -6,6 +6,8 @@
 // @description  Record a ChatGPT transcript and export cleaned plain text
 // @match        https://chatgpt.com/*
 // @run-at       document-idle
+// @updateURL    https://raw.githubusercontent.com/ddrewpublic/UserScripts/main/ChatGPT_Stream_Capture-1.1.user.js
+// @downloadURL  https://raw.githubusercontent.com/ddrewpublic/UserScripts/main/ChatGPT_Stream_Capture-1.1.user.js
 // @grant        GM_registerMenuCommand
 // @grant        GM_unregisterMenuCommand
 // ==/UserScript==
