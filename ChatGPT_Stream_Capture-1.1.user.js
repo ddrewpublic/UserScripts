@@ -5,8 +5,8 @@
 // @description  Capture visible ChatGPT streaming responses
 // @match        https://chatgpt.com/*
 // @run-at       document-idle
-// @updateURL    https://raw.githubusercontent.com/ddrewpublic/UserScripts/main/ChatGPT%20Beacon%20Banner%20Auto-Dismiss-0.2.0.user.js
-// @downloadURL  https://raw.githubusercontent.com/ddrewpublic/UserScripts/main/ChatGPT%20Beacon%20Banner%20Auto-Dismiss-0.2.0.user.js
+// @updateURL    https://raw.githubusercontent.com/ddrewpublic/UserScripts/main/ChatGPT_Stream_Capture-1.1.user.js
+// @downloadURL  https://raw.githubusercontent.com/ddrewpublic/UserScripts/main/ChatGPT_Stream_Capture-1.1.user.js
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand
