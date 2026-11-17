@@ -1,8 +1,11 @@
 // ==UserScript==
 // @name         ChatGPT Beacon Banner Auto-Dismiss
 // @namespace    https://chatgpt.com/
+// @homepageURL  https://github.com/ddrewpublic/UserScripts
 // @version      0.2.0
 // @description  Automatically dismiss visible ChatGPT beacon/promotional banners.
+// @updateURL    https://raw.githubusercontent.com/ddrewpublic/UserScripts/main/ChatGPT_Beacon_Banner_Auto-Dismiss-0.2.0.user.js
+// @downloadURL  https://raw.githubusercontent.com/ddrewpublic/UserScripts/main/ChatGPT_Beacon_Banner_Auto-Dismiss-0.2.0.user.js
 // @match        https://chatgpt.com/*
 // @run-at       document-idle
 // @grant        none

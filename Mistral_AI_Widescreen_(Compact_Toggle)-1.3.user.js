@@ -1,8 +1,11 @@
 // ==UserScript==
 // @name         Mistral AI Widescreen (Compact Toggle)
 // @namespace    mistral-widescreen-compact
+// @homepageURL  https://github.com/ddrewpublic/UserScripts
 // @version      1.3
 // @description  Widescreen for Mistral AI with a tiny toggle button that expands on hover
+// @updateURL    https://raw.githubusercontent.com/ddrewpublic/UserScripts/main/Mistral_AI_Widescreen_(Compact_Toggle)-1.3.user.js
+// @downloadURL  https://raw.githubusercontent.com/ddrewpublic/UserScripts/main/Mistral_AI_Widescreen_(Compact_Toggle)-1.3.user.js
 // @author       Le Chat
 // @match        *://chat.mistral.ai/*
 // @grant        GM_addStyle

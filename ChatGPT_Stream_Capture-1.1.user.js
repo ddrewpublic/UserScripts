@@ -1,9 +1,12 @@
 // ==UserScript==
 // @name         ChatGPT Stream Capture
-// @namespace    local.chatgpt.capture
-// @version      1.1
+// @namespace    https://github.com/ddrewpublic/UserScripts
+// @version      1.2.0
+// @description  Capture visible ChatGPT streaming responses
 // @match        https://chatgpt.com/*
 // @run-at       document-idle
+// @updateURL    https://raw.githubusercontent.com/ddrewpublic/UserScripts/main/ChatGPT%20Beacon%20Banner%20Auto-Dismiss-0.2.0.user.js
+// @downloadURL  https://raw.githubusercontent.com/ddrewpublic/UserScripts/main/ChatGPT%20Beacon%20Banner%20Auto-Dismiss-0.2.0.user.js
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_registerMenuCommand

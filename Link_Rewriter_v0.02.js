@@ -1,8 +1,11 @@
 // ==UserScript==
 // @name         Link Rewriter (configurable add/remove)
 // @namespace    https://example.com/
+// @homepageURL  https://github.com/ddrewpublic/UserScripts
 // @version      0.02
 // @description  Generic link rewriting on specific sites with configurable add/remove rules.
+// @updateURL    https://raw.githubusercontent.com/ddrewpublic/UserScripts/main/Link_Rewriter_v0.02.js
+// @downloadURL  https://raw.githubusercontent.com/ddrewpublic/UserScripts/main/Link_Rewriter_v0.02.js
 // @match        *://*/*
 // @grant        none
 // ==/UserScript==

@@ -1,11 +1,9 @@
 // ==UserScript==
 // @name         Redlib - Advertising Post Filter
-// @namespace    https://github.com/ddrewpublic/UserScripts
-// @version      0.03
 // @homepageURL  https://github.com/ddrewpublic/UserScripts
-// @updateURL    https://github.com/ddrewpublic/UserScripts/raw/refs/heads/main/Redlib_Ad_Post_Filter_v0.01.user.js
-// @downloadURL  https://github.com/ddrewpublic/UserScripts/raw/refs/heads/main/Redlib_Ad_Post_Filter_v0.01.user.js
 // @version      0.03
+// @updateURL    https://raw.githubusercontent.com/ddrewpublic/UserScripts/main/Redlib_Ad_Post_Filter_v0.01.user.js
+// @downloadURL  https://raw.githubusercontent.com/ddrewpublic/UserScripts/main/Redlib_Ad_Post_Filter_v0.01.user.js
 // @description  Filter suspected advertising posts via the Tampermonkey menu.
 // @match        https://redlib.catsarch.com/r/all*
 // @run-at       document-idle

@@ -1,8 +1,11 @@
 // ==UserScript==
 // @name         ChatGPT Bottom Area Resizer (unified target, persistent)
+// @namespace    https://github.com/ddrewpublic/UserScripts
 // @namespace    cgpt-tools
 // @version      0.8
 // @description  Drag up = increase. Resizes #thread-bottom (normal) or #thread-bottom-container (project). Grip stays next to the input.
+// @updateURL    https://raw.githubusercontent.com/ddrewpublic/UserScripts/main/ChatGPT_Bottom_Area_Resizer_v0.06.js
+// @downloadURL  https://raw.githubusercontent.com/ddrewpublic/UserScripts/main/ChatGPT_Bottom_Area_Resizer_v0.06.js
 // @match        https://chat.openai.com/*
 // @match        https://chatgpt.com/*
 // @run-at       document-idle
