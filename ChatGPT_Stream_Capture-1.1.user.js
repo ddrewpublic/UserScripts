@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Stream Capture
 // @namespace    https://github.com/ddrewpublic/UserScripts
-// @version      1.2.1
+// @version      1.2.2
 // @description  Capture visible ChatGPT streaming responses
 // @match        https://chatgpt.com/*
 // @run-at       document-idle
@@ -28,12 +28,9 @@
   captures = captures.slice(-MAX_SNAPSHOTS);
   let previous = "";
   let observer = null;
-  let saveTimer = null;
   let toggleMenuId = null;
 
   function save() {
-    clearTimeout(saveTimer);
-    saveTimer = null;
     GM_setValue(DATA_KEY, captures);
   }
 
@@ -76,8 +73,16 @@
     );
   }
 
-  function start() {
+  function start(freshSession = false) {
     if (observer) return;
+
+    // Explicit starts discard old captures. Automatic restart after a page
+    // reload preserves the active recording session.
+    if (freshSession) {
+      captures = [];
+      previous = "";
+      save();
+    }
 
     recording = true;
     GM_setValue(STATE_KEY, true);
@@ -108,7 +113,15 @@
   }
 
   function toggle() {
-    recording ? stop() : start();
+    recording ? stop() : start(true);
+  }
+
+  function discardCaptures() {
+    // Stop first to prevent an observer callback repopulating the cleared data.
+    if (recording) stop();
+    captures = [];
+    previous = "";
+    save();
   }
 
   function exportCaptures() {
@@ -133,6 +146,7 @@
   }
 
   GM_registerMenuCommand("Export captures", exportCaptures);
+  GM_registerMenuCommand("Discard captures", discardCaptures);
 
   GM_registerMenuCommand(
     "Snapshot count",
@@ -142,7 +156,7 @@
   window.addEventListener("pagehide", save);
 
   if (recording) {
-    start();
+    start(false);
   } else {
     updateMenu();
   }
