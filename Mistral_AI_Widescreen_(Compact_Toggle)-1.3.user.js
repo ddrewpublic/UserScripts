@@ -2,7 +2,7 @@
 // @name         Mistral AI Widescreen (Compact Toggle)
 // @namespace    mistral-widescreen-compact
 // @homepageURL  https://github.com/ddrewpublic/UserScripts
-// @version      1.3
+// @version      1.3.1
 // @description  Widescreen for Mistral AI with a tiny toggle button that expands on hover
 // @updateURL    https://raw.githubusercontent.com/ddrewpublic/UserScripts/main/Mistral_AI_Widescreen_(Compact_Toggle)-1.3.user.js
 // @downloadURL  https://raw.githubusercontent.com/ddrewpublic/UserScripts/main/Mistral_AI_Widescreen_(Compact_Toggle)-1.3.user.js
@@ -15,8 +15,8 @@
 (function() {
     'use strict';
 
-    // Apply widescreen styles
-    GM_addStyle(`
+    // Keep a reference to our own stylesheet; never remove another script's CSS.
+    const widescreenStyle = GM_addStyle(`
         /* Widen the chat container (input and messages) */
         .flex.max-w-(--breakpoint-md).min-w-0.flex-1.shrink.flex-col.gap-8 {
             max-width: 90vw !important;
@@ -104,16 +104,13 @@
         right: 80px;
     `;
 
-    // Toggle styles on/off
+    // Toggle only our own rules. The toggle button stays available.
+    let enabled = true;
     button.onclick = function() {
-        const style = document.querySelector('style[gm-style]');
-        if (style) {
-            style.remove();
-            button.textContent = 'W';
-            button.title = 'Enable Widescreen';
-        } else {
-            location.reload();
-        }
+        enabled = !enabled;
+        widescreenStyle.disabled = !enabled;
+        button.textContent = enabled ? 'W' : 'w';
+        button.title = enabled ? 'Disable Widescreen' : 'Enable Widescreen';
     };
 
     document.body.appendChild(button);

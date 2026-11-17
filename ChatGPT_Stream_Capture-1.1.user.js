@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Stream Capture
 // @namespace    https://github.com/ddrewpublic/UserScripts
-// @version      1.2.0
+// @version      1.2.2
 // @description  Capture visible ChatGPT streaming responses
 // @match        https://chatgpt.com/*
 // @run-at       document-idle
@@ -18,17 +18,19 @@
 
   const DATA_KEY = "chatgpt-captures-v1";
   const STATE_KEY = "chatgpt-recording-v1";
+  // Keep a bounded number of snapshots to limit Tampermonkey storage growth.
+  const MAX_SNAPSHOTS = 500;
+  const MAX_TEXT_LENGTH = 500000;
 
   let recording = GM_getValue(STATE_KEY, false);
   let captures = GM_getValue(DATA_KEY, []);
+  if (!Array.isArray(captures)) captures = [];
+  captures = captures.slice(-MAX_SNAPSHOTS);
   let previous = "";
   let observer = null;
-  let saveTimer = null;
   let toggleMenuId = null;
 
   function save() {
-    clearTimeout(saveTimer);
-    saveTimer = null;
     GM_setValue(DATA_KEY, captures);
   }
 
@@ -36,6 +38,11 @@
     if (!recording) return;
 
     const text = document.body.innerText.trim();
+    // Avoid persisting extremely large full-page snapshots.
+    if (text.length > MAX_TEXT_LENGTH) {
+      console.warn("[ChatGPT Capture] Snapshot exceeds size limit; skipped.");
+      return;
+    }
 
     if (!text || text === previous) return;
 
@@ -47,8 +54,10 @@
       text
     });
 
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(save, 250);
+    // Bound history and persist each snapshot promptly. A debounce can lose
+    // the latest snapshots if the page is closed before its timer fires.
+    if (captures.length > MAX_SNAPSHOTS) captures.shift();
+    save();
   }
 
   function updateMenu() {
@@ -64,8 +73,16 @@
     );
   }
 
-  function start() {
+  function start(freshSession = false) {
     if (observer) return;
+
+    // Explicit starts discard old captures. Automatic restart after a page
+    // reload preserves the active recording session.
+    if (freshSession) {
+      captures = [];
+      previous = "";
+      save();
+    }
 
     recording = true;
     GM_setValue(STATE_KEY, true);
@@ -96,7 +113,15 @@
   }
 
   function toggle() {
-    recording ? stop() : start();
+    recording ? stop() : start(true);
+  }
+
+  function discardCaptures() {
+    // Stop first to prevent an observer callback repopulating the cleared data.
+    if (recording) stop();
+    captures = [];
+    previous = "";
+    save();
   }
 
   function exportCaptures() {
@@ -121,6 +146,7 @@
   }
 
   GM_registerMenuCommand("Export captures", exportCaptures);
+  GM_registerMenuCommand("Discard captures", discardCaptures);
 
   GM_registerMenuCommand(
     "Snapshot count",
@@ -130,7 +156,7 @@
   window.addEventListener("pagehide", save);
 
   if (recording) {
-    start();
+    start(false);
   } else {
     updateMenu();
   }

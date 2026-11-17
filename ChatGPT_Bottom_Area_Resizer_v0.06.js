@@ -2,7 +2,7 @@
 // @name         ChatGPT Bottom Area Resizer (unified target, persistent)
 // @namespace    https://github.com/ddrewpublic/UserScripts
 // @namespace    cgpt-tools
-// @version      0.8
+// @version      0.8.1
 // @description  Drag up = increase. Resizes #thread-bottom (normal) or #thread-bottom-container (project). Grip stays next to the input.
 // @updateURL    https://raw.githubusercontent.com/ddrewpublic/UserScripts/main/ChatGPT_Bottom_Area_Resizer_v0.06.js
 // @downloadURL  https://raw.githubusercontent.com/ddrewpublic/UserScripts/main/ChatGPT_Bottom_Area_Resizer_v0.06.js
@@ -138,6 +138,9 @@
       setStored(STORE_KEY, DEFAULT_PX);
     }
 
+    // Mouse release outside the window may not dispatch mouseup here.
+    // Clear dragging on focus loss so the grip cannot become stuck.
+    window.addEventListener('blur', onUp);
     grip.addEventListener('mousedown', onDown);
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);

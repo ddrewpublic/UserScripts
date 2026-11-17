@@ -2,7 +2,7 @@
 // @name         Link Rewriter (configurable add/remove)
 // @namespace    https://example.com/
 // @homepageURL  https://github.com/ddrewpublic/UserScripts
-// @version      0.02
+// @version      0.03
 // @description  Generic link rewriting on specific sites with configurable add/remove rules.
 // @updateURL    https://raw.githubusercontent.com/ddrewpublic/UserScripts/main/Link_Rewriter_v0.02.js
 // @downloadURL  https://raw.githubusercontent.com/ddrewpublic/UserScripts/main/Link_Rewriter_v0.02.js
@@ -161,16 +161,9 @@
     const cleaned = transformUrlString(original);
     if (cleaned !== original) {
       a.setAttribute('href', cleaned);
-      // Direct navigation for plain left-click (no modifiers)
-      if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey) {
-        e.preventDefault();
-        const target = a.getAttribute('target');
-        if (target === '_blank') {
-          window.open(cleaned, '_blank');
-        } else {
-          location.href = cleaned;
-        }
-      }
+      // Allow the browser and site handlers to perform navigation normally.
+      // Only the anchor URL needs to change; do not prevent the click.
+
     }
   }
 
