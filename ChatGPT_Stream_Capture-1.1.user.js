@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ChatGPT Stream Capture
 // @namespace    https://github.com/ddrewpublic/UserScripts
-// @version      1.2.0
+// @version      1.2.1
 // @description  Capture visible ChatGPT streaming responses
 // @match        https://chatgpt.com/*
 // @run-at       document-idle
@@ -18,9 +18,14 @@
 
   const DATA_KEY = "chatgpt-captures-v1";
   const STATE_KEY = "chatgpt-recording-v1";
+  // Keep a bounded number of snapshots to limit Tampermonkey storage growth.
+  const MAX_SNAPSHOTS = 500;
+  const MAX_TEXT_LENGTH = 500000;
 
   let recording = GM_getValue(STATE_KEY, false);
   let captures = GM_getValue(DATA_KEY, []);
+  if (!Array.isArray(captures)) captures = [];
+  captures = captures.slice(-MAX_SNAPSHOTS);
   let previous = "";
   let observer = null;
   let saveTimer = null;
@@ -36,6 +41,11 @@
     if (!recording) return;
 
     const text = document.body.innerText.trim();
+    // Avoid persisting extremely large full-page snapshots.
+    if (text.length > MAX_TEXT_LENGTH) {
+      console.warn("[ChatGPT Capture] Snapshot exceeds size limit; skipped.");
+      return;
+    }
 
     if (!text || text === previous) return;
 
@@ -47,8 +57,10 @@
       text
     });
 
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(save, 250);
+    // Bound history and persist each snapshot promptly. A debounce can lose
+    // the latest snapshots if the page is closed before its timer fires.
+    if (captures.length > MAX_SNAPSHOTS) captures.shift();
+    save();
   }
 
   function updateMenu() {
