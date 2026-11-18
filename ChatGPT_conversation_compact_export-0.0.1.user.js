@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name         ChatGPT conversation export
 // @namespace    local.chatgpt.conversation-export
-// @version      0.0.1
+// @version      0.0.2
 // @author       ddrewpublic
 // @license      MIT
 // @basedupon    https://github.com/arandomhooman/chatgpt-conversation-export
 // @description  Export the full current conversation as TXT, with optional reasoning and tool activity.
-// @description  Filter for repeated cruft and redundant values.
+// @description  Export readable JSON/TXT or a deduplicated GitHub work archive.
 // @match        https://chatgpt.com/*
 // @run-at       document-start
 // @grant        none
@@ -19,7 +19,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.0.2';
+  const VERSION = '1.1.0';
   const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
   const escapeHTML = value => String(value ?? '').replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -205,6 +205,231 @@
     };
   }
 
+
+  // Compact work archive: preserve visible messages and distinct file versions,
+  // but exclude repeated GitHub reads, previews, execution wrappers, and reasoning.
+  const WORK_ACTIONS = new Set([
+    'create_file', 'update_file', 'delete_file', 'create_branch',
+    'create_pull_request', 'update_pull_request', 'create_tree',
+    'create_commit', 'update_ref'
+  ]);
+  const encoder = new TextEncoder();
+
+  async function digest(text) {
+    const data = encoder.encode(text);
+    const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', data));
+    return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+  }
+
+  function unpackToolMessage(message) {
+    const c = message?.content;
+    if (c?.content_type !== 'code' || typeof c.text !== 'string') return null;
+    try {
+      const parsed = JSON.parse(c.text);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+    } catch { return null; }
+  }
+
+  function fileLocation(file) {
+    // GitHub display_url is metadata, not a guarantee of a known branch/path.
+    const url = file?.display_url;
+    if (typeof url !== 'string') return null;
+    try {
+      const parsed = new URL(url);
+      if (parsed.hostname !== 'github.com') return null;
+      const segments = parsed.pathname.split('/').filter(Boolean);
+      if (segments.length < 5 || segments[2] !== 'blob') return null;
+      // The ref may contain slashes. When the repository path is unknown,
+      // retain the full suffix rather than asserting an incorrect path.
+      const suffix = segments.slice(3);
+      // File paths in manuscript repositories have a stable source_material root.
+      // Keep it when present even if the branch name contains slashes.
+      const anchor = suffix.indexOf('source_material');
+      const path = anchor >= 0 ? suffix.slice(anchor).join('/') :
+        ['main', 'master'].includes(suffix[0]) ? suffix.slice(1).join('/') : suffix.join('/');
+      return { repo: `${segments[0]}/${segments[1]}`, source_path: path };
+    } catch { return null; }
+  }
+
+  function workMessages(data) {
+    // Full original content, role, order and timestamps remain unchanged.
+    return data.messages.filter(m => m.kind === 'message' &&
+      (m.role === 'user' || m.role === 'assistant')).map(m => {
+      const copy = {};
+      for (const k of ['role', 'kind', 'create_time', 'content']) {
+        if (Object.prototype.hasOwnProperty.call(m, k)) copy[k] = m[k];
+      }
+      return copy;
+    });
+  }
+
+  function compactConversation(data) {
+    return {
+      format: 'chatgpt-readable-conversation/v1',
+      conversation_id: data.conversation_id, title: data.title,
+      source_url: data.source_url, exported_at: data.exported_at,
+      messages: workMessages(data)
+    };
+  }
+
+  function transcript(data) {
+    const lines = [data.title || 'ChatGPT conversation', '='.repeat(50), ''];
+    for (const [index, message] of workMessages(data).entries()) {
+      const parts = message.content?.parts || [];
+      const body = parts.map(part => typeof part === 'string' ? part : JSON.stringify(part)).join('\n');
+      lines.push(`[${index + 1}] ${message.role.toUpperCase()}`, body, '');
+    }
+    return lines.join('\n');
+  }
+
+  async function compactWorkArchive(data, progress = () => {}, signal = null) {
+    const versions = new Map();
+    const requests = [], results = [], prs = new Map(), patches = new Map();
+    const statistics = { reads: 0, writes: 0, tool_records_skipped: 0 };
+    const fileIdentity = async (repo, path, body, origin, sha = null, url = null) => {
+      if (typeof body !== 'string' || typeof path !== 'string') return null;
+      const hash = await digest(body);
+      const key = JSON.stringify([repo || 'unknown', path, hash]);
+      let version = versions.get(key);
+      if (!version) {
+        const pathHash = await digest(`${repo || 'unknown'}|${path}`);
+        version = {
+          id: `file-${hash.slice(0, 16)}-${pathHash.slice(0, 8)}`,
+          repository: repo || 'unknown', path, sha256: hash,
+          content: body, git_blob_sha: sha || null, source_url: url || null, origins: [origin]
+        };
+        versions.set(key, version);
+      } else {
+        if (!version.origins.includes(origin)) version.origins.push(origin);
+        if (!version.git_blob_sha && sha) version.git_blob_sha = sha;
+      }
+      return version.id;
+    };
+
+    const addPr = pr => {
+      if (!pr || typeof pr !== 'object' || pr.number == null) return;
+      const summary = {};
+      for (const k of ['number', 'title', 'url', 'html_url', 'state', 'merged',
+                       'merge_commit_sha', 'created_at', 'updated_at', 'closed_at', 'merged_at']) {
+        if (pr[k] != null && typeof pr[k] !== 'object') summary[k] = pr[k];
+      }
+      const previous = prs.get(String(pr.number));
+      if (!previous || String(summary.updated_at || '') >= String(previous.updated_at || '')) {
+        prs.set(String(pr.number), summary);
+      }
+    };
+    const savePatch = async item => {
+      if (typeof item?.patch !== 'string') return;
+      const hash = await digest(item.patch);
+      const id = `patch-${hash.slice(0, 20)}`;
+      if (!patches.has(id)) patches.set(id, { id, filename: item.filename || null, patch: item.patch });
+    };
+
+    for (let i = 0; i < data.messages.length; i++) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+      const message = data.messages[i];
+      const parsed = unpackToolMessage(message);
+      if (!parsed) {
+        if (message.kind !== 'message') statistics.tool_records_skipped++;
+        continue;
+      }
+      const time = message.create_time ?? null;
+      if (message.role === 'assistant' && parsed.path?.startsWith('/GitHub/')) {
+        const action = parsed.path.split('/').at(-1);
+        if (!WORK_ACTIONS.has(action)) continue;
+        const args = parsed.args;
+        if (!args || typeof args !== 'object' || Array.isArray(args)) continue;
+        const compactArgs = { ...args };
+        delete compactArgs.link_id;
+        const body = compactArgs.content;
+        delete compactArgs.content;
+        if (typeof body === 'string' && ['create_file', 'update_file'].includes(action)) {
+          compactArgs.file_version_id = await fileIdentity(
+            compactArgs.repository_full_name, compactArgs.path, body, 'write_request'
+          );
+          statistics.writes++;
+        }
+        // Preserve the action and concise arguments, not huge duplicated payloads.
+        for (const [key, value] of Object.entries(compactArgs)) {
+          const serialized = JSON.stringify(value);
+          if (serialized && encoder.encode(serialized).byteLength > 4096) {
+            compactArgs[key] = { sha256: await digest(serialized),
+              original_utf8_bytes: encoder.encode(serialized).byteLength,
+              summary: 'bulk argument omitted from compact worklog' };
+          }
+        }
+        requests.push({ index: i, time, operation: action, args: compactArgs });
+      } else if (message.role === 'tool') {
+        const action = parsed.action_name;
+        const response = parsed.result;
+        if (action === 'fetch_file' && response && typeof response.content === 'string') {
+          const location = fileLocation(response);
+          // Preserve all readable file bodies, even when their path cannot be resolved.
+          const repo = location?.repo || 'unknown';
+          const path = location?.source_path || response.display_title || `unknown-file-${i}`;
+          await fileIdentity(repo, path, response.content, 'fetch_file', response.sha, response.display_url);
+          statistics.reads++;
+        } else if (WORK_ACTIONS.has(action)) {
+          const compactResult = {};
+          if (response && typeof response === 'object') {
+            for (const key of ['commit_sha', 'content_sha', 'sha', 'url', 'branch',
+                               'ref', 'tree', 'merged', 'number', 'state', 'title',
+                               'merge_commit_sha', 'head', 'base']) {
+              if (response[key] != null && typeof response[key] !== 'object') {
+                compactResult[key] = response[key];
+              }
+            }
+            if (response.pull_request) {
+              addPr(response.pull_request);
+              compactResult.pull_request = Object.fromEntries(
+                ['number', 'title', 'url', 'state', 'merged', 'merge_commit_sha']
+                  .filter(k => response.pull_request[k] != null)
+                  .map(k => [k, response.pull_request[k]])
+              );
+            }
+          }
+          results.push({ index: i, time, operation: action,
+            result: compactResult, error: parsed.error || null });
+        } else if (action === 'fetch_pr_patch' && Array.isArray(response?.patches)) {
+          for (const patch of response.patches) await savePatch(patch);
+        } else if (action === 'fetch_pr') {
+          addPr(response?.pull_request);
+          if (typeof parsed.diff === 'string') await savePatch({patch: parsed.diff});
+        }
+        // Expanded GitHub PR lists may arrive in a wrapper with title 'pulls'.
+        if (parsed.title === 'pulls' && typeof parsed.content === 'string') {
+          try {
+            const items = JSON.parse(parsed.content);
+            if (Array.isArray(items)) for (const item of items) addPr(item);
+          } catch { }
+        }
+      }
+      if (i > 0 && i % 400 === 0) {
+        progress(`Compacting work archive: ${i.toLocaleString()} / ${data.messages.length.toLocaleString()} records…`);
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+    }
+    const meta = {
+      format: 'chatgpt-compact-work-archive/v1',
+      conversation_id: data.conversation_id, title: data.title,
+      source_url: data.source_url, exported_at: data.exported_at,
+      note: 'Editorial work archive, not a lossless ChatGPT export. Read-only GitHub tool traffic, redundant previews, reasoning and internal API metadata are omitted.',
+      messages: workMessages(data), file_versions: [...versions.values()],
+      github_requests: requests, github_results: results,
+      pull_requests: [...prs.values()].sort((a, b) => String(a.number).localeCompare(String(b.number))),
+      unique_patches: [...patches.values()]
+    };
+    meta.compaction = { original_message_records: data.messages.length,
+      retained_conversation_messages: meta.messages.length,
+      unique_file_versions: versions.size,
+      github_write_requests: requests.length,
+      github_write_results: results.length,
+      unique_patches: patches.size,
+      source_file_reads: statistics.reads,
+      source_write_bodies: statistics.writes };
+    return meta;
+  }
+
   function safeURL(raw) {
     try {
       const url = new URL(raw, 'https://chatgpt.com/');
@@ -340,7 +565,7 @@ pre{background:var(--surface);border:1px solid var(--border);padding:16px;border
     return `${name} - ${String(id).slice(0, 8)}.${extension}`;
   }
 
-  const core = { loadHistory, exportData, htmlDocument, filename, markdown, records, pageInfo };
+  const core = { loadHistory, exportData, htmlDocument, filename, markdown, records, pageInfo, compactConversation, compactWorkArchive, transcript };
   if (typeof window === 'undefined') {
     if (typeof module !== 'undefined') module.exports = core;
     return;
@@ -491,13 +716,30 @@ pre{background:var(--surface);border:1px solid var(--border);padding:16px;border
     try {
       const history = await readConversation(id, controller.signal);
       if (controller.signal.aborted || conversationID() !== id) throw new DOMException('Aborted', 'AbortError');
-      const data = exportData(history, id, document.title.replace(/\s*[-|]\s*ChatGPT$/, ''), checkbox.checked, `${location.origin}${location.pathname}`);
+      const data = exportData(history, id, document.title.replace(/\s*[-|]\s*ChatGPT$/, ''), (format === 'work' || checkbox.checked), `${location.origin}${location.pathname}`);
       status.textContent = `Preparing ${data.messages.length.toLocaleString()} messages…`;
       // Let the progress text paint before formatting a large conversation.
       await new Promise(resolve => setTimeout(resolve, 0));
       if (controller.signal.aborted || conversationID() !== id) throw new DOMException('Aborted', 'AbortError');
-      download(format === 'json' ? JSON.stringify(data, null, 2) : htmlDocument(data),
-        format === 'json' ? 'application/json;charset=utf-8' : 'text/html;charset=utf-8', filename(data.title, id, format));
+      let output, mime, extension;
+      if (format === 'work') {
+        output = JSON.stringify(await compactWorkArchive(data, text => { status.textContent = text; }, controller.signal), null, 2);
+        mime = 'application/json;charset=utf-8'; extension = 'work-archive.json';
+      } else if (format === 'clean') {
+        output = JSON.stringify(compactConversation(data), null, 2);
+        mime = 'application/json;charset=utf-8'; extension = 'readable.json';
+      } else if (format === 'txt') {
+        output = transcript(data);
+        mime = 'text/plain;charset=utf-8'; extension = 'readable.txt';
+      } else if (format === 'json') {
+        output = JSON.stringify(data, null, 2);
+        mime = 'application/json;charset=utf-8'; extension = 'json';
+      } else {
+        output = htmlDocument(data);
+        mime = 'text/html;charset=utf-8'; extension = 'html';
+      }
+      if (controller.signal.aborted || conversationID() !== id) throw new DOMException('Aborted', 'AbortError');
+      download(output, mime, filename(data.title, id, extension));
       status.textContent = `Downloaded ${data.messages.length.toLocaleString()} messages from ${history.pageCount} history ${history.pageCount === 1 ? 'page' : 'pages'}.${history.warnings.length ? ' See the branch note in the file.' : ''}`;
     } catch (error) {
       status.textContent = error.name === 'AbortError' ? 'Export cancelled.' : error.message || 'Export failed. Reload this chat and try again.';
@@ -545,6 +787,9 @@ pre{background:var(--surface);border:1px solid var(--border);padding:16px;border
 <div class="title">Download conversation</div>
 <button class="option" data-format="html"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="m8 7-5 5 5 5m8-10 5 5-5 5m-3-13-2 16"/></svg><span>HTML<span class="subtitle">Readable, self-contained page</span></span></button>
 <button class="option" data-format="json"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M9 4H7v6l-3 2 3 2v6h2m6-16h2v6l3 2-3 2v6h-2"/></svg><span>JSON<span class="subtitle">Structured message content</span></span></button>
+<button class="option" data-format="clean"><span>Readable JSON<span class="subtitle">Conversation only; no tools or reasoning</span></span></button>
+<button class="option" data-format="txt"><span>Readable TXT<span class="subtitle">Numbered user/assistant transcript</span></span></button>
+<button class="option" data-format="work"><span>Compact work archive<span class="subtitle">Distinct file versions and GitHub change history</span></span></button>
 <div class="divider"></div>
 <label class="toggle"><input type="checkbox" role="switch"><span>Include reasoning &amp; tools<span class="subtitle">Activity available in the conversation</span></span></label>
 <div class="status" role="status" aria-live="polite">Downloads the full saved chat, including unloaded history.</div>
